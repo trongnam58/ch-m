@@ -22,6 +22,70 @@ dữ liệu đã chuyển ra kho lưu `C:\Users\hayab\nsai_archive_bpic2017` (m�
 | [docs/CONG_TRINH_LIEN_QUAN.md](docs/CONG_TRINH_LIEN_QUAN.md) | Công trình liên quan (đọc toàn văn) |
 | [docs/CAP_HIEU_LUC_THOI_GIAN.md](docs/CAP_HIEU_LUC_THOI_GIAN.md) | Hiệu lực theo thời gian của văn bản CAP (giới hạn + độ nhạy) |
 
+
+> **Kiến trúc Hệ thống & Quy trình Thực thi:** Hệ thống hoạt động theo pipeline **Neuro-Symbolic + Graph-RAG lấy Knowledge Graph có Metamodel đóng làm gốc (thay UML trong MDE)** — hợp nhất văn bản pháp luật và nhật ký sự kiện vào KG 5 tầng, khóa không gian sinh của LLM bằng môi trường kiểu `Γ` chiếu tự động từ KG, và kiểm chứng từng ràng buộc DECLARE qua chuỗi cổng ký hiệu (nghĩa vụ, cú pháp/kiểu, đối chiếu log thực tế, dịch ngược) trước khi ghi ngược vào KG kèm vết bằng chứng.
+
+
+```mermaid
+flowchart TD
+    subgraph G1["Giai đoạn 1: Dựng Knowledge Graph (Metamodel M2) & Chiếu Môi trường kiểu Γ"]
+        RAW_LAW["Văn bản Luật: EU CAP & Luật Đức (2015-2017)"]
+        RAW_ONTO["Ontology Loại giấy tờ (đã người duyệt)"]
+        RAW_LOG["Nhật ký Sự kiện: BPIC2018 (43.809 hồ sơ)"]
+
+        RAW_LAW -->|"Tách điều khoản, dẫn chiếu & định nghĩa"| KG_LEGAL["Tầng Pháp lý: cap_legal_graph_v2 / de_legal_graph"]
+        RAW_ONTO -->|"Đối sánh thuật ngữ (MAPS_TO)"| KG_BRIDGE["Tầng Cầu nối: cap / de_mapping_graph.json"]
+        RAW_LOG -->|"Khai phá luồng & hồ sơ tiến trình"| KG_PROC["Tầng Tiến trình: bpic2018_process_graph & profile"]
+        KG_PROC -->|"Kiểm Metamodel M2 & Chiếu tự động"| GAMMA["Môi trường kiểu Γ: gamma_bpic2018.json"]
+    end
+
+    KG_LEGAL -->|"Graph-RAG Retrieval (REFERS_TO, DEFINES)"| CTX
+    KG_BRIDGE -->|"Gợi ý loại giấy tờ liên quan"| CTX
+    GAMMA -->|"Ràng buộc từ vựng & kiểu dữ liệu"| CTX
+
+    subgraph G2["Giai đoạn 2: Truy xuất Ngữ cảnh Đồ thị & Sinh Ràng buộc Neuro-Symbolic"]
+        CAND["Điều khoản ứng viên: item_candidates.json"] --> CTX["Gói Ngữ cảnh Luật + Gợi ý MAPS_TO + Lược đồ Γ"]
+        CTX -->|"Structured JSON Prompt"| LLM["LLM (gpt-oss-120b, temperature=0) - Sinh Nghĩa vụ, Norm & AST"]
+        LLM -->|"JSON (obligation_analysis + norm + AST)"| GATE_DN{"Cổng D & N1-N2: Có nghĩa vụ diễn đạt được?"}
+
+        GATE_DN -->|"Không (no_constraint)"| BASELESS["Kết luận: BASELESS (Từ chối khoản bẫy)"]
+        GATE_DN -->|"Có"| GATE_L12{"Tầng 1-2 & N3-N5: Đúng cú pháp AST, kiểu Γ, miền giá trị & MAPS_TO?"}
+
+        GATE_L12 -->|"Lỗi cú pháp / kiểu / thiếu thời hạn"| DIAG["Bộ Chẩn đoán Phản hồi (tối đa max_retry = 5)"]
+        GATE_L12 -->|"Hợp lệ"| GATE_LOG{"Kiểm trên Log (B & v2): Không rỗng, đúng năm & không vi phạm >20%?"}
+
+        GATE_LOG -->|"Rỗng (0 kích hoạt) / Lệch năm / Phản ví dụ"| DIAG
+        GATE_LOG -->|"Đạt trên dữ liệu log"| GATE_L3{"Tầng 3: Entity Matcher (Số/Ngày) & Giám khảo Dịch ngược?"}
+
+        GATE_L3 -->|"Phát hiện bẫy ngữ nghĩa"| BASELESS
+        GATE_L3 -->|"Lệch con số / lệch nghĩa luật gốc"| DIAG
+        DIAG -->|"Còn lượt: Trả chẩn đoán để tự sửa"| LLM
+        DIAG -->|"Quá 5 vòng tự sửa"| FAILED["Kết luận: FAILED"]
+    end
+
+    KG_PROC -.->|"Đối chiếu trực tiếp trên BPIC2018"| GATE_LOG
+    GATE_L3 -->|"PASSED (Outcome: RULE)"| VERIFIED
+
+    subgraph G3["Giai đoạn 3: Ghi ngược KG 5 tầng, Kiểm toán Tuân thủ & Giải thích"]
+        VERIFIED["Ràng buộc DECLARE đã kiểm chứng: predictions_*.json (.decl)"]
+        VERIFIED -->|"Tích ô-tô-mát DFA (CONFLICTS_WITH, IMPLIES)"| FULL_KG["KG 5 tầng đầy đủ: kg_full_*.json & Neo4j / Cypher (M8)"]
+        VERIFIED -->|"Engine Declare4Py chạy toàn bộ log"| CONF["Phán quyết 43.809 hồ sơ: conformance.json"]
+        VERIFIED -->|"Truy vết bằng chứng & Phân tầng rủi ro"| REPORT["Proof Trace + Nhãn REVIEW + Báo cáo report.html"]
+    end
+```
+
+*(Lưu ý: Toàn bộ nhãn có ký tự đặc biệt `()`, `:`, `&`, `>` đều đã được bọc ngoặc kép `"..."` và không dùng thẻ HTML nên sẽ không bị lỗi cú pháp hay cắt chữ trên GitHub Markdown).*
+
+
+
+
+
+
+
+
+
+
+
 ## Cài đặt nhanh
 
 ```powershell
