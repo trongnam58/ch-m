@@ -22,6 +22,36 @@ dữ liệu đã chuyển ra kho lưu `C:\Users\hayab\nsai_archive_bpic2017` (m�
 | [docs/CONG_TRINH_LIEN_QUAN.md](docs/CONG_TRINH_LIEN_QUAN.md) | Công trình liên quan (đọc toàn văn) |
 | [docs/CAP_HIEU_LUC_THOI_GIAN.md](docs/CAP_HIEU_LUC_THOI_GIAN.md) | Hiệu lực theo thời gian của văn bản CAP (giới hạn + độ nhạy) |
 
+```mermaid
+%%{init: {'theme': 'dark', 'flowchart': {'curve': 'stepAfter', 'nodeSpacing': 50, 'rankSpacing': 55}}}%%
+flowchart TD
+    subgraph G1["Giai đoạn 1: Khởi tạo Knowledge Graph (Metamodel đóng)"]
+        L["Văn bản Luật EU CAP & Đức<br/>(Theo phiên bản năm)"] -->|"Phân rã điều khoản"| KG[("Knowledge Graph<br/>Metamodel đóng")]
+        E["Nhật ký BPIC2018<br/>(43.809 hồ sơ, 2,5M sự kiện)"] -->|"Trích xuất thực thể & lược đồ"| KG
+    end
+
+    KG -->|"Truy xuất ngữ cảnh +<br/>Khuôn ràng buộc hợp lệ"| CTX
+
+    subgraph G2["Giai đoạn 2: Sinh ràng buộc hướng khuôn (Neural)"]
+        CTX["Ngữ cảnh Luật +<br/>Khung thực thể KG"] -->|"Ràng buộc không gian sinh"| LLM["LLM: gpt-oss-120b<br/>(Cerebras / Groq)"]
+        LLM --> CAND["Ràng buộc DECLARE ứng viên"]
+    end
+
+    CAND --> V1
+
+    subgraph G3["Giai đoạn 3: Chuỗi kiểm định ký hiệu (Symbolic Verifier)"]
+        V1["1. Kiểm cú pháp (Syntax)"] --> V2["2. Kiểm kiểu trên KG (Type)"]
+        V2 --> V3["3. Kiểm thực nghiệm trên Log"]
+        V3 --> V4["4. Dịch ngược đối chiếu luật"]
+    end
+
+    V4 -->|"Đạt cả 4 bước +<br/>Gói bằng chứng"| OUT[("Ghi ngược vào KG<br/>(DECLARE + Evidence)")]
+```
+
+
+
+
+
 ## Cài đặt nhanh
 
 ```powershell
